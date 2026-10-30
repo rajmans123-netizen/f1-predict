@@ -24,18 +24,30 @@ fetch(`data/circuit/${slug}.json`).then((r) => r.json()).then((c) => {
     <path d="${d}" fill="none" stroke="#fff" stroke-width="160" stroke-linejoin="round"/>
     ${cs.map(([n, x, y]) => { const [px, py] = T(x, y).split(','); return `<circle cx="${px}" cy="${py}" r="330" fill="#00A859"/><text x="${px}" y="${py}" font-size="380" font-weight="900" fill="#fff" text-anchor="middle" dominant-baseline="central" font-family="Titillium Web">${n}</text>`; }).join('')}`;
 });
+const F = await fetch(`data/forecast/${slug}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+const FC = F ? Object.fromEntries(F.drivers.map((d) => [d.code, d])) : {};
+if (F) {
+  const h = F.history, best = F.drivers[0];
+  $('fc').innerHTML = `<h3>The optimal lap, forecast before a car has run</h3>
+    <div class="big">${fmt(best.total)} <span style="font-size:16px;color:var(--muted)">${best.code}, best S1 + S2 + S3</span></div>
+    <div class="steps">
+      <div><b>${fmt(h[2023].total)} → ${fmt(h[2024].total)} → ${fmt(h[2025].total)}</b>Mexico's optimal lap in qualifying, 2023 to 2025</div>
+      <div><b>+${((F.era_factor - 1) * 100).toFixed(1)}% slower</b>2026 rules (new engines, active aero, smaller cars), measured at ${F.circuits.length} tracks raced in both 2025 and 2026, with this season's upgrade trend</div>
+      <div><b>Each driver's gap</b>their 2026 qualifying pace vs the fastest, recent races weighted more</div>
+    </div>`;
+} else $('fc').remove();
 let cur = P.stages.length - 1;
 function show(k) {
   cur = k; const st = P.stages[k];
   [...$('stages').children].forEach((b, i) => b.classList.toggle('on', i === k));
-  $('how').innerHTML = 'Blend: ' + Object.entries(st.weights).map(([w, v]) => `<b>${Math.round(v * 100)}%</b> ${NAMES[w]}`).join(' · ');
+  $('how').innerHTML = (st.rows.some((r) => r.optimal == null) && F ? '* forecast optimal lap (no running yet) · ' : '') + 'Blend: ' + Object.entries(st.weights).map(([w, v]) => `<b>${Math.round(v * 100)}%</b> ${NAMES[w]}`).join(' · ');
   $('rows').innerHTML = st.rows.map((r) => {
     const mv = r.prev == null ? '' : r.prev - r.pos;
     const cls = mv === '' ? 'eq' : mv > 0 ? 'up' : mv < 0 ? 'dn' : 'eq';
     const arrow = mv === '' ? '' : mv > 0 ? `▲${mv}` : mv < 0 ? `▼${-mv}` : '–';
     return `<div class="row ${r.pos <= 3 ? 'top3' : ''}"><div class="pos">P${r.pos}</div><div class="mv ${cls}">${arrow}</div>
       <div class="drv"><b style="background:${r.color}"></b><div><div class="c">${r.code}${r.grid ? ` <span class="t">· grid P${r.grid}</span>` : ''}</div><div class="t">${r.team}</div></div></div>
-      <div class="num ${r.gap === 0 ? 'p' : ''}">${fmt(r.optimal)}</div><div class="num y">${r.left != null ? '-' + r.left.toFixed(3) : '–'}</div>
+      ${r.optimal == null && FC[r.code] ? `<div class="num f" title="forecast">${fmt(FC[r.code].total)}*</div>` : `<div class="num ${r.gap === 0 ? 'p' : ''}">${fmt(r.optimal)}</div>`}<div class="num y">${r.left != null ? '-' + r.left.toFixed(3) : '–'}</div>
       <div class="num">${fmt(r.longrun)}</div><div class="num m">${r.form != null ? 'P' + r.form.toFixed(1) : '–'}</div></div>`;
   }).join('');
 }

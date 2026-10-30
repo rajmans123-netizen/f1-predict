@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The optimal lap · F1 Predict</title>
+<meta name="description" content="Every driver's optimal lap (their best sector 1 + 2 + 3), driven on the real track, racing each other.">
+<meta name="theme-color" content="#050506">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@400;600;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+html, body { margin: 0; height: 100%; background: #050506; color: #F2F3F5; font-family: 'Titillium Web', system-ui, sans-serif; overflow: hidden; -webkit-font-smoothing: antialiased; }
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+.ui { position: fixed; left: 12px; bottom: 12px; display: flex; gap: 8px; z-index: 2; }
+.ui select, .ui button { font: 700 14px 'Titillium Web'; color: #F2F3F5; background: rgba(20,22,29,.85); border: 1px solid #2A2E3B; border-radius: 8px; padding: 8px 10px; }
+.back { position: fixed; right: 12px; bottom: 12px; z-index: 2; color: #8A8F9E; font-weight: 700; font-size: 13px; text-decoration: none; background: rgba(20,22,29,.85); border: 1px solid #2A2E3B; border-radius: 8px; padding: 8px 10px; }
+body.clean .ui, body.clean .back, body.clean .picker { display: none; }
+.picker { position: fixed; left: 12px; right: 12px; bottom: 64px; z-index: 3; background: rgba(14,15,20,.96); border: 1px solid #2A2E3B; border-radius: 14px; padding: 12px; display: none; max-width: 520px; }
+.picker.on { display: block; }
+.ph { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 14px; }
+.ph button { font: 700 13px 'Titillium Web'; color: #F2F3F5; background: #1B1E28; border: 1px solid #2A2E3B; border-radius: 6px; padding: 4px 10px; margin-left: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { font: 900 14px 'Titillium Web'; color: #8A8F9E; background: #14161D; border: 1px solid #2A2E3B; border-left: 5px solid var(--c); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.chips button.on { color: #fff; background: #23262F; border-color: var(--c); }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div class="ui"><button id="pickBtn">Drivers ▾</button><button id="play">❚❚</button></div>
+<div class="picker" id="picker"><div class="ph"><b>Race the optimal lap against</b><span><button id="all">All</button><button id="none">Clear</button></span></div><div class="chips" id="chips"></div></div>
+<a class="back" href="./">← Predicted finish</a>
+<script type="module" src="optimal.js"></script>
+</body>
+</html>

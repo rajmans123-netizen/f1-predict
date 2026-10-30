@@ -35,6 +35,15 @@ main { max-width: 980px; margin: 0 auto; padding: 18px 16px 40px; }
 .facts small { color: var(--muted); font-weight: 700; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
 .count { font: 700 15px 'JetBrains Mono'; color: var(--yellow); }
 #track { width: 100%; height: 280px; }
+.cta { display: inline-block; margin-top: 4px; background: var(--yellow); color: #000; font: 900 16px 'Titillium Web'; padding: 10px 16px; border-radius: 999px; text-decoration: none; }
+.fc { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; margin: 0 0 22px; }
+.fc h3 { margin: 0 0 6px; font: 900 20px 'Titillium Web'; }
+.fc .big { font: 900 34px 'Titillium Web'; color: var(--purple); }
+.fc .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+.fc .steps div { background: #0F1117; border-radius: 10px; padding: 10px 12px; font-size: 13.5px; color: var(--muted); }
+.fc .steps b { display: block; color: var(--ink); font-size: 18px; }
+.num.f { color: var(--purple); opacity: .8; }
+@media (max-width: 700px) { .fc .steps { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .hero { grid-template-columns: 1fr; } .hero h1 { font-size: 34px; } #track { height: 220px; } }
 h1 { font: 900 30px/1.05 'Titillium Web'; margin: 0 0 4px; }
 .sub { color: var(--muted); font-weight: 600; margin-bottom: 14px; }
@@ -80,9 +89,11 @@ footer a { color: inherit; }
       <div class="count" id="count"></div>
       <div class="facts"><div><b>71</b><small>laps</small></div><div><b>4.304 km</b><small>lap</small></div><div><b>2,200 m+</b><small>altitude: thin air, less downforce</small></div></div>
       <div class="sub" id="sub"></div>
+      <a class="cta" href="optimal.html">▶ Watch the optimal lap</a>
     </div>
     <svg id="track" aria-label="Mexico City circuit"></svg>
   </section>
+  <section class="fc" id="fc"></section>
   <h2 style="font:900 24px 'Titillium Web';margin:0 0 10px">Who wins? Predicted finish</h2>
   <div class="stages" id="stages"></div>
   <div class="how" id="how"></div>
