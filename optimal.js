@@ -13,8 +13,11 @@ const TITLE = Q.get('title') || DATA.title || `${DATA.location} Grand Prix`.toUp
 const DRV = DATA.drivers;
 
 // ---- per-driver arrays + distance along the lap
+const smooth = (a, w) => a.map((_, i) => { let s = 0, n = 0; for (let k = Math.max(0, i - w); k <= Math.min(a.length - 1, i + w); k++) { s += a[k]; n++; } return s / n; });
 for (const d of DRV) {
-  const T = d.trace; d.s = [0];
+  const T = d.trace;
+  T.x = smooth(smooth(T.x, 4), 4); T.y = smooth(smooth(T.y, 4), 4);   // positions come ~4x a second: smooth out the kinks
+  d.s = [0];
   for (let i = 1; i < T.t.length; i++) d.s.push(d.s[i - 1] + Math.hypot(T.x[i] - T.x[i - 1], T.y[i] - T.y[i - 1]));
   d.L = d.s[d.s.length - 1];
 }
@@ -65,6 +68,7 @@ const speedColor = (v) => {                                   // red (slow) → 
   }
   return `rgb(${stops[stops.length - 1][1]})`;
 };
+const mix = (rgb, k) => { const c = rgb.match(/\d+/g).map(Number), b = [38, 38, 43]; return `rgb(${c.map((v, i) => Math.round(v + (b[i] - v) * k))})`; };
 const fmt = (s) => `${Math.floor(s / 60)}:${(s % 60).toFixed(3).padStart(6, '0')}`;
 const FOLLOW = DRV.find((d) => d.optimal) || REF;                  // the camera rides the optimal lap
 const FIELD = DRV.filter((d) => d !== FOLLOW);
@@ -72,17 +76,18 @@ let SEL = new Set((Q.get('drivers') || FIELD[0].code).toUpperCase().split(',').f
 
 function render(t) {
   g.setTransform(DPR, 0, 0, DPR, 0, 0); g.fillStyle = '#050506'; g.fillRect(0, 0, W, H);
-  const me = at(FOLLOW, t), ahead = at(FOLLOW, Math.min(FOLLOW.total, t + 0.25)), behind = at(FOLLOW, Math.max(0, t - 0.25));
+  const me = at(FOLLOW, t), ahead = at(FOLLOW, Math.min(FOLLOW.total, t + 0.5)), behind = at(FOLLOW, Math.max(0, t - 0.5));
   const head = Math.atan2(ahead.y - behind.y, ahead.x - behind.x);
   const cx = W / 2, cy = H * 0.4;
-  // track ~46% of the width; zoom out (down to a third of that) so the picked drivers stay in frame above the readout
-  let scale = (Math.min(W, H * 0.62) * 0.46) / TW;
-  const room = H * 0.62 - cy;
-  for (const d of FIELD) {
-    if (!SEL.has(d.code)) continue;
-    const p = at(d, t), dist = Math.hypot(p.x - me.x, p.y - me.y) + 2 * UNITS_PER_M;
-    if (dist * scale > room) scale = Math.max(scale / 3, room / dist);
-  }
+  // track ~46% of the width; zoom out (down to a third of that) so the picked drivers stay in frame above the readout,
+  // averaged over 4 s so the zoom eases instead of pulsing
+  const base = (Math.min(W, H * 0.62) * 0.46) / TW, room = H * 0.66 - cy;
+  const need = (tt) => {
+    const m = at(FOLLOW, tt); let sc = base;
+    for (const d of FIELD) { if (!SEL.has(d.code)) continue; const p = at(d, tt), dist = Math.hypot(p.x - m.x, p.y - m.y) + 2 * UNITS_PER_M; if (dist * sc > room) sc = Math.max(base / 3, room / dist); }
+    return sc;
+  };
+  let scale = 0; for (let k = -8; k <= 8; k++) scale += need(Math.max(0, t + k * 0.25)); scale /= 17;
   // world → screen: car at (cx, cy), heading up (data y is up)
   const rot = Math.PI / 2 - head;
   const P = (x, y) => { const dx = x - me.x, dy = y - me.y; const rx = dx * Math.cos(rot) - dy * Math.sin(rot), ry = dx * Math.sin(rot) + dy * Math.cos(rot); return [cx + rx * scale, cy - ry * scale]; };
@@ -108,13 +113,14 @@ function render(t) {
   // trail: the last 3.5 s, coloured by speed
   const T = FOLLOW.trace; let i1 = 0; { let lo = 0, hi = T.t.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (T.t[m] <= t) lo = m; else hi = m - 1; } i1 = lo; }
   let i0 = i1; while (i0 > 0 && T.t[i0] > t - 3.5) i0--;
-  g.lineWidth = 9;
-  for (let i = i0 + 1; i <= i1; i++) {
-    const [ax, ay] = P(T.x[i - 1], T.y[i - 1]), [bx, by] = P(T.x[i], T.y[i]);
-    g.strokeStyle = speedColor(T.v[i]); g.globalAlpha = 0.35 + 0.65 * (i - i0) / (i1 - i0 + 1);
-    g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke();
+  // one continuous line: short overlapping runs, each in its speed colour, older parts fading into the tarmac
+  g.lineWidth = 7;
+  for (let i = i0; i < i1; i += 2) {
+    const j = Math.min(i1, i + 3), age = (i1 - i) / Math.max(1, i1 - i0);
+    g.beginPath(); for (let k = i; k <= j; k++) { const [px, py] = P(T.x[k], T.y[k]); k === i ? g.moveTo(px, py) : g.lineTo(px, py); }
+    if (j === i1) g.lineTo(cx, cy);
+    g.strokeStyle = mix(speedColor(T.v[j]), age * 0.75); g.stroke();
   }
-  g.globalAlpha = 1;
   // ghosts: the top 10's optimal laps at the same moment; a label only where it won't overlap another
   const ghosts = FIELD.filter((d) => SEL.has(d.code)).map((d) => { const p = at(d, t); const [px, py] = P(p.x, p.y); return { d, px, py }; })
     .filter(({ px, py }) => px > -40 && px < W + 40 && py > -40 && py < H + 40).sort((a, b) => a.py - b.py);
@@ -138,17 +144,17 @@ function render(t) {
   g.fillStyle = '#fff'; g.font = `900 ${Math.round(W * 0.062)}px "Titillium Web"`; g.fillText('THE OPTIMAL LAP', W / 2, H * 0.085);
   g.fillStyle = '#8A8F9E'; g.font = `700 ${Math.round(W * 0.032)}px "Titillium Web"`; g.fillText(TITLE, W / 2, H * 0.085 + W * 0.05);
   // bottom readout
-  const gr = g.createLinearGradient(0, H * 0.66, 0, H); gr.addColorStop(0, 'rgba(5,5,6,0)'); gr.addColorStop(0.35, 'rgba(5,5,6,.88)'); gr.addColorStop(1, 'rgba(5,5,6,.96)');
-  g.fillStyle = gr; g.fillRect(0, H * 0.66, W, H * 0.34);
+  const gr = g.createLinearGradient(0, H * 0.72, 0, H); gr.addColorStop(0, 'rgba(5,5,6,0)'); gr.addColorStop(0.35, 'rgba(5,5,6,.85)'); gr.addColorStop(1, 'rgba(5,5,6,.96)');
+  g.fillStyle = gr; g.fillRect(0, H * 0.72, W, H * 0.28);
   const status = me.brk > 0.5 ? ['BRAKING', '#FF3B30'] : me.thr > 95 ? ['FULL THROTTLE', '#7CFF5B'] : ['LIFT', '#FFD60A'];
-  const yb = H * 0.79;
-  g.fillStyle = status[1]; g.font = `900 ${Math.round(W * 0.03)}px "Titillium Web"`; g.fillText(status[0], W / 2, yb - W * 0.13);
-  g.fillStyle = '#fff'; g.font = `900 ${Math.round(W * 0.15)}px "Titillium Web"`; g.fillText(Math.round(me.v), W / 2, yb);
-  g.fillStyle = '#8A8F9E'; g.font = `700 ${Math.round(W * 0.03)}px "Titillium Web"`; g.fillText(`KM/H · GEAR ${me.gear}`, W / 2, yb + W * 0.05);
-  g.fillStyle = '#fff'; g.font = `700 ${Math.round(W * 0.04)}px "JetBrains Mono"`; g.fillText(fmt(Math.min(t, FOLLOW.total)), W / 2, yb + W * 0.12);
+  const yb = H * 0.835;
+  g.fillStyle = status[1]; g.font = `900 ${Math.round(W * 0.024)}px "Titillium Web"`; g.fillText(status[0], W / 2, yb - W * 0.085);
+  g.fillStyle = '#fff'; g.font = `900 ${Math.round(W * 0.095)}px "Titillium Web"`; g.fillText(Math.round(me.v), W / 2, yb);
+  g.fillStyle = '#8A8F9E'; g.font = `700 ${Math.round(W * 0.024)}px "Titillium Web"`; g.fillText(`KM/H · GEAR ${me.gear}`, W / 2, yb + W * 0.04);
+  g.fillStyle = '#fff'; g.font = `700 ${Math.round(W * 0.03)}px "JetBrains Mono"`; g.fillText(fmt(Math.min(t, FOLLOW.total)), W / 2, yb + W * 0.09);
   g.fillStyle = '#8A8F9E'; g.font = `600 ${Math.round(W * 0.028)}px "Titillium Web"`;
   g.fillText(DATA.kind === 'forecast' ? `Optimal lap forecast ${fmt(FOLLOW.total)} · 2025 optimal ${fmt(DATA.meta.history[2025].total)}`
-    : `${FOLLOW.name} · optimal ${fmt(FOLLOW.total)} · best real lap ${fmt(FOLLOW.best)}`, W / 2, yb + W * 0.17);
+    : `${FOLLOW.name} · optimal ${fmt(FOLLOW.total)} · best real lap ${fmt(FOLLOW.best)}`, W / 2, yb + W * 0.13);
   // sector pill
   const sEnds = [FOLLOW.sectors[0], FOLLOW.sectors[0] + FOLLOW.sectors[1], FOLLOW.total];
   sEnds.forEach((e, k) => {
@@ -174,7 +180,7 @@ function render(t) {
     g.fillText('BEHIND THE OPTIMAL LAP', W / 2, H * 0.085 + W * 0.19); g.textAlign = 'left';
   }
   const lx = W * 0.04, ly0 = H * 0.27, lh = W * 0.052;
-  g.textAlign = 'left'; g.font = `700 ${Math.round(W * 0.026)}px "Titillium Web"`; g.fillStyle = '#8A8F9E'; if (rows.length) g.fillText('VS OPTIMAL LAP', lx, ly0 - lh * 0.5);
+  g.textAlign = 'left'; g.font = `700 ${Math.round(W * 0.026)}px "Titillium Web"`; g.fillStyle = '#8A8F9E'; if (rows.length) g.fillText('VS OPTIMAL LAP', lx, ly0 - lh * 0.95);
   rows.forEach(({ d, gap }, k) => {
     const y = ly0 + k * lh; g.fillStyle = d.color; g.fillRect(lx, y - lh * 0.55, 4, lh * 0.7);
     g.fillStyle = d === FOLLOW ? '#fff' : '#C9CCD4'; g.font = `900 ${Math.round(W * 0.03)}px "Titillium Web"`; g.fillText(d.code, lx + 10, y);
