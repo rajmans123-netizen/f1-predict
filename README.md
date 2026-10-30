@@ -1,4 +1,4 @@
-# F1 Predict · who wins the next race
+# F1 Predict · Mexico City GP 2026
 
 Every driver's **optimal lap** and a **predicted finishing order** for the next Formula 1 race, updated after every practice session and qualifying.
 
