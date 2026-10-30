@@ -29,7 +29,7 @@ const lerpAt = (arr, key, t) => {           // value of trace[key] at time t (ar
   return A[lo] + (A[hi] - A[lo]) * k;
 };
 const at = (d, t) => {
-  const tt = Math.min(t, d.total);
+  const tt = t < 0 ? d.total + t : Math.min(t, d.total);   // before the line: the end of the lap, arriving at speed
   const T = d.trace, S = { t: T.t, s: d.s };
   return { x: lerpAt(T, 'x', tt), y: lerpAt(T, 'y', tt), v: lerpAt(T, 'v', tt), thr: lerpAt(T, 'thr', tt), brk: lerpAt(T, 'brk', tt), gear: Math.round(lerpAt(T, 'gear', tt)), s: lerpAt(S, 's', tt) };
 };
@@ -91,7 +91,7 @@ function render(t) {
   // world → screen: car at (cx, cy), heading up (data y is up)
   const rot = Math.PI / 2 - head;
   const P = (x, y) => { const dx = x - me.x, dy = y - me.y; const rx = dx * Math.cos(rot) - dy * Math.sin(rot), ry = dx * Math.sin(rot) + dy * Math.cos(rot); return [cx + rx * scale, cy - ry * scale]; };
-  const path = (xs, ys, step = 1) => { g.beginPath(); for (let i = 0; i < xs.length; i += step) { const [px, py] = P(xs[i], ys[i]); i ? g.lineTo(px, py) : g.moveTo(px, py); } };
+  const path = (xs, ys, step = 1) => { g.beginPath(); for (let i = 0; i < xs.length; i += step) { const [px, py] = P(xs[i], ys[i]); i ? g.lineTo(px, py) : g.moveTo(px, py); } g.closePath(); };   // a full loop
   g.lineCap = g.lineJoin = 'round';
   // track: white edges, dark tarmac, faint centre line
   path(TR.x, TR.y, 2); g.strokeStyle = '#E8E8EA'; g.lineWidth = TW * scale + 8; g.stroke();
@@ -110,16 +110,28 @@ function render(t) {
     if (!on) { g.beginPath(); g.moveTo(px, py); on = true; } else g.lineTo(px, py);
   }
   if (on) g.stroke(); g.setLineDash([]); g.lineCap = 'round';
+  // the chequered start/finish line across the track
+  {
+    const dx = TR.x[4] - TR.x[0], dy = TR.y[4] - TR.y[0], l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l, nx = -uy, ny = ux;
+    const sq = TW / 8;
+    for (let row = 0; row < 2; row++) for (let k = 0; k < 8; k++) {
+      const a = -TW / 2 + k * sq, b = row * sq, q = [[a, b], [a + sq, b], [a + sq, b + sq], [a, b + sq]].map(([u, v]) => P(TR.x[0] + nx * u + ux * v, TR.y[0] + ny * u + uy * v));
+      g.beginPath(); q.forEach(([px, py], i) => (i ? g.lineTo(px, py) : g.moveTo(px, py))); g.closePath();
+      g.fillStyle = (row + k) % 2 ? '#111' : '#F5F5F7'; g.fill();
+    }
+  }
   // trail: the last 3.5 s, coloured by speed
-  const T = FOLLOW.trace; let i1 = 0; { let lo = 0, hi = T.t.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (T.t[m] <= t) lo = m; else hi = m - 1; } i1 = lo; }
-  let i0 = i1; while (i0 > 0 && T.t[i0] > t - 3.5) i0--;
+  // the trail's samples for the last 3.5 s (wrapping round the end of the lap before the line)
+  const T = FOLLOW.trace, N = T.t.length, idxAt = (tt) => { let lo = 0, hi = N - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (T.t[m] <= tt) lo = m; else hi = m - 1; } return lo; };
+  const pts = [];
+  for (let tt = t - 3.5; tt <= t + 1e-6; tt += 0.05) { const w = tt < 0 ? FOLLOW.total + tt : Math.min(tt, FOLLOW.total); const i = idxAt(w); if (pts[pts.length - 1] !== i) pts.push(i); }
   // one continuous line: short overlapping runs, each in its speed colour, older parts fading into the tarmac
   g.lineWidth = 7;
-  for (let i = i0; i < i1; i += 2) {
-    const j = Math.min(i1, i + 3), age = (i1 - i) / Math.max(1, i1 - i0);
-    g.beginPath(); for (let k = i; k <= j; k++) { const [px, py] = P(T.x[k], T.y[k]); k === i ? g.moveTo(px, py) : g.lineTo(px, py); }
-    if (j === i1) g.lineTo(cx, cy);
-    g.strokeStyle = mix(speedColor(T.v[j]), age * 0.75); g.stroke();
+  for (let a = 0; a < pts.length - 1; a += 2) {
+    const b = Math.min(pts.length - 1, a + 3), age = (pts.length - 1 - a) / Math.max(1, pts.length - 1);
+    g.beginPath(); for (let k = a; k <= b; k++) { const [px, py] = P(T.x[pts[k]], T.y[pts[k]]); k === a ? g.moveTo(px, py) : g.lineTo(px, py); }
+    if (b === pts.length - 1) g.lineTo(cx, cy);
+    g.strokeStyle = mix(speedColor(T.v[pts[b]]), age * 0.75); g.stroke();
   }
   // ghosts: the top 10's optimal laps at the same moment; a label only where it won't overlap another
   const ghosts = FIELD.filter((d) => SEL.has(d.code)).map((d) => { const p = at(d, t); const [px, py] = P(p.x, p.y); return { d, px, py }; })
@@ -151,7 +163,7 @@ function render(t) {
   g.fillStyle = status[1]; g.font = `900 ${Math.round(W * 0.024)}px "Titillium Web"`; g.fillText(status[0], W / 2, yb - W * 0.085);
   g.fillStyle = '#fff'; g.font = `900 ${Math.round(W * 0.095)}px "Titillium Web"`; g.fillText(Math.round(me.v), W / 2, yb);
   g.fillStyle = '#8A8F9E'; g.font = `700 ${Math.round(W * 0.024)}px "Titillium Web"`; g.fillText(`KM/H · GEAR ${me.gear}`, W / 2, yb + W * 0.04);
-  g.fillStyle = '#fff'; g.font = `700 ${Math.round(W * 0.03)}px "JetBrains Mono"`; g.fillText(fmt(Math.min(t, FOLLOW.total)), W / 2, yb + W * 0.09);
+  g.fillStyle = '#fff'; g.font = `700 ${Math.round(W * 0.03)}px "JetBrains Mono"`; g.fillText(fmt(Math.max(0, Math.min(t, FOLLOW.total))), W / 2, yb + W * 0.09);
   g.fillStyle = '#8A8F9E'; g.font = `600 ${Math.round(W * 0.028)}px "Titillium Web"`;
   g.fillText(DATA.kind === 'forecast' ? `Optimal lap forecast ${fmt(FOLLOW.total)} · 2025 optimal ${fmt(DATA.meta.history[2025].total)}`
     : `${FOLLOW.name} · optimal ${fmt(FOLLOW.total)} · best real lap ${fmt(FOLLOW.best)}`, W / 2, yb + W * 0.13);
@@ -172,7 +184,7 @@ function render(t) {
   g.strokeStyle = 'rgba(255,255,255,.75)'; g.lineWidth = 2; g.stroke();
   const [mpx, mpy] = M(me.x, me.y); g.beginPath(); g.arc(mpx, mpy, 5, 0, Math.PI * 2); g.fillStyle = col; g.fill();
   // live gaps to the camera car, left side
-  const f = me.s / FOLLOW.L, rows = FIELD.filter((d) => SEL.has(d.code)).map((d) => ({ d, gap: timeAtFrac(d, f) - timeAtFrac(FOLLOW, f) })).sort((a, b) => a.gap - b.gap);
+  const f = me.s / FOLLOW.L, rows = t < 0 ? [] : FIELD.filter((d) => SEL.has(d.code)).map((d) => ({ d, gap: timeAtFrac(d, f) - timeAtFrac(FOLLOW, f) })).sort((a, b) => a.gap - b.gap);
   if (rows.length === 1) {                                     // one driver: their gap, big, under the speed
     const { d, gap } = rows[0];
     g.textAlign = 'center'; g.font = `900 ${Math.round(W * 0.05)}px "Titillium Web"`; g.fillStyle = d.color;
@@ -200,11 +212,11 @@ $('all').onclick = () => { SEL = new Set(FIELD.map((d) => d.code)); chips(); };
 $('none').onclick = () => { SEL = new Set(); chips(); };
 $('pickBtn').onclick = () => $('picker').classList.toggle('on');
 chips();
-let t = Number(Q.get('t')) || 0, playing = !Q.get('paused'), last = performance.now();
+let t = Q.get('t') != null ? Number(Q.get('t')) : -2, playing = !Q.get('paused'), last = performance.now();
 $('play').onclick = () => { playing = !playing; $('play').textContent = playing ? '❚❚' : '▶'; };
 function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
-  if (playing) { t += dt; if (t > FOLLOW.total + 2) t = 0; }
+  if (playing) { t += dt; if (t > FOLLOW.total + 2) t = -2; }
   render(t); requestAnimationFrame(frame);
 }
 if (!Q.get('paused')) requestAnimationFrame(frame); else render(t);
