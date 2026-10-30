@@ -13,7 +13,7 @@ const TITLE = Q.get('title') || DATA.title || `${DATA.location} Grand Prix`.toUp
 const DRV = DATA.drivers;
 
 // ---- per-driver arrays + distance along the lap
-const smooth = (a, w) => a.map((_, i) => { let s = 0, n = 0; for (let k = Math.max(0, i - w); k <= Math.min(a.length - 1, i + w); k++) { s += a[k]; n++; } return s / n; });
+const smooth = (a, w) => a.map((_, i) => { let s = 0; for (let k = i - w; k <= i + w; k++) s += a[(k + a.length) % a.length]; return s / (2 * w + 1); });   // wraps: a lap is a loop
 for (const d of DRV) {
   const T = d.trace;
   T.x = smooth(smooth(T.x, 4), 4); T.y = smooth(smooth(T.y, 4), 4);   // positions come ~4x a second: smooth out the kinks
@@ -76,7 +76,8 @@ let SEL = new Set((Q.get('drivers') || FIELD[0].code).toUpperCase().split(',').f
 
 function render(t) {
   g.setTransform(DPR, 0, 0, DPR, 0, 0); g.fillStyle = '#050506'; g.fillRect(0, 0, W, H);
-  const me = at(FOLLOW, t), ahead = at(FOLLOW, Math.min(FOLLOW.total, t + 0.5)), behind = at(FOLLOW, Math.max(0, t - 0.5));
+  const U = Math.min(W, H * 0.5625);   // text and panels are sized for a phone-shaped frame, whatever the window
+  const me = at(FOLLOW, t), ahead = at(FOLLOW, Math.min(FOLLOW.total, t + 0.5)), behind = at(FOLLOW, t - 0.5);   // before the line, t < 0 wraps to the lap's end
   const head = Math.atan2(ahead.y - behind.y, ahead.x - behind.x);
   const cx = W / 2, cy = H * 0.4;
   // track ~46% of the width; zoom out (down to a third of that) so the picked drivers stay in frame above the readout,
@@ -87,7 +88,7 @@ function render(t) {
     for (const d of FIELD) { if (!SEL.has(d.code)) continue; const p = at(d, tt), dist = Math.hypot(p.x - m.x, p.y - m.y) + 2 * UNITS_PER_M; if (dist * sc > room) sc = Math.max(base / 3, room / dist); }
     return sc;
   };
-  let scale = 0; for (let k = -8; k <= 8; k++) scale += need(Math.max(0, t + k * 0.25)); scale /= 17;
+  let scale = 0; for (let k = -8; k <= 8; k++) scale += need(Math.min(FOLLOW.total, t + k * 0.25)); scale /= 17;
   // world → screen: car at (cx, cy), heading up (data y is up)
   const rot = Math.PI / 2 - head;
   const P = (x, y) => { const dx = x - me.x, dy = y - me.y; const rx = dx * Math.cos(rot) - dy * Math.sin(rot), ry = dx * Math.sin(rot) + dy * Math.cos(rot); return [cx + rx * scale, cy - ry * scale]; };
@@ -134,7 +135,7 @@ function render(t) {
     g.strokeStyle = mix(speedColor(T.v[pts[b]]), age * 0.75); g.stroke();
   }
   // ghosts: the top 10's optimal laps at the same moment; a label only where it won't overlap another
-  const ghosts = FIELD.filter((d) => SEL.has(d.code)).map((d) => { const p = at(d, t); const [px, py] = P(p.x, p.y); return { d, px, py }; })
+  const ghosts = FIELD.filter((d) => t >= 0 && SEL.has(d.code)).map((d) => { const p = at(d, t); const [px, py] = P(p.x, p.y); return { d, px, py }; })
     .filter(({ px, py }) => px > -40 && px < W + 40 && py > -40 && py < H + 40).sort((a, b) => a.py - b.py);
   let lastLabel = -1e9;
   for (const { d, px, py } of ghosts) {
@@ -153,31 +154,31 @@ function render(t) {
   const fade = (y0, y1, a) => { const gr = g.createLinearGradient(0, y0, 0, y1); gr.addColorStop(0, `rgba(5,5,6,${a})`); gr.addColorStop(1, 'rgba(5,5,6,0)'); return gr; };
   g.fillStyle = fade(0, H * 0.2, 0.92); g.fillRect(0, 0, W, H * 0.2);
   g.textAlign = 'center'; g.textBaseline = 'alphabetic';
-  g.fillStyle = '#fff'; g.font = `900 ${Math.round(W * 0.062)}px "Titillium Web"`; g.fillText('THE OPTIMAL LAP', W / 2, H * 0.085);
-  g.fillStyle = '#8A8F9E'; g.font = `700 ${Math.round(W * 0.032)}px "Titillium Web"`; g.fillText(TITLE, W / 2, H * 0.085 + W * 0.05);
+  g.fillStyle = '#fff'; g.font = `900 ${Math.round(U * 0.062)}px "Titillium Web"`; g.fillText('THE OPTIMAL LAP', W / 2, H * 0.085);
+  g.fillStyle = '#8A8F9E'; g.font = `700 ${Math.round(U * 0.032)}px "Titillium Web"`; g.fillText(TITLE, W / 2, H * 0.085 + U * 0.05);
   // bottom readout
   const gr = g.createLinearGradient(0, H * 0.72, 0, H); gr.addColorStop(0, 'rgba(5,5,6,0)'); gr.addColorStop(0.35, 'rgba(5,5,6,.85)'); gr.addColorStop(1, 'rgba(5,5,6,.96)');
   g.fillStyle = gr; g.fillRect(0, H * 0.72, W, H * 0.28);
   const status = me.brk > 0.5 ? ['BRAKING', '#FF3B30'] : me.thr > 95 ? ['FULL THROTTLE', '#7CFF5B'] : ['LIFT', '#FFD60A'];
   const yb = H * 0.835;
-  g.fillStyle = status[1]; g.font = `900 ${Math.round(W * 0.024)}px "Titillium Web"`; g.fillText(status[0], W / 2, yb - W * 0.085);
-  g.fillStyle = '#fff'; g.font = `900 ${Math.round(W * 0.095)}px "Titillium Web"`; g.fillText(Math.round(me.v), W / 2, yb);
-  g.fillStyle = '#8A8F9E'; g.font = `700 ${Math.round(W * 0.024)}px "Titillium Web"`; g.fillText(`KM/H · GEAR ${me.gear}`, W / 2, yb + W * 0.04);
-  g.fillStyle = '#fff'; g.font = `700 ${Math.round(W * 0.03)}px "JetBrains Mono"`; g.fillText(fmt(Math.max(0, Math.min(t, FOLLOW.total))), W / 2, yb + W * 0.09);
-  g.fillStyle = '#8A8F9E'; g.font = `600 ${Math.round(W * 0.028)}px "Titillium Web"`;
+  g.fillStyle = status[1]; g.font = `900 ${Math.round(U * 0.024)}px "Titillium Web"`; g.fillText(status[0], W / 2, yb - U * 0.085);
+  g.fillStyle = '#fff'; g.font = `900 ${Math.round(U * 0.095)}px "Titillium Web"`; g.fillText(Math.round(me.v), W / 2, yb);
+  g.fillStyle = '#8A8F9E'; g.font = `700 ${Math.round(U * 0.024)}px "Titillium Web"`; g.fillText(`KM/H · GEAR ${me.gear}`, W / 2, yb + U * 0.04);
+  g.fillStyle = '#fff'; g.font = `700 ${Math.round(U * 0.03)}px "JetBrains Mono"`; g.fillText(fmt(Math.max(0, Math.min(t, FOLLOW.total))), W / 2, yb + U * 0.09);
+  g.fillStyle = '#8A8F9E'; g.font = `600 ${Math.round(U * 0.028)}px "Titillium Web"`;
   g.fillText(DATA.kind === 'forecast' ? `Optimal lap forecast ${fmt(FOLLOW.total)} · 2025 optimal ${fmt(DATA.meta.history[2025].total)}`
-    : `${FOLLOW.name} · optimal ${fmt(FOLLOW.total)} · best real lap ${fmt(FOLLOW.best)}`, W / 2, yb + W * 0.13);
+    : `${FOLLOW.name} · optimal ${fmt(FOLLOW.total)} · best real lap ${fmt(FOLLOW.best)}`, W / 2, yb + U * 0.13);
   // sector pill
   const sEnds = [FOLLOW.sectors[0], FOLLOW.sectors[0] + FOLLOW.sectors[1], FOLLOW.total];
   sEnds.forEach((e, k) => {
     const dt = t - e; if (dt < 0 || dt > 1.8) return;
-    const txt = `S${k + 1}  ${FOLLOW.sectors[k].toFixed(3)}`; g.font = `900 ${Math.round(W * 0.036)}px "Titillium Web"`;
+    const txt = `S${k + 1}  ${FOLLOW.sectors[k].toFixed(3)}`; g.font = `900 ${Math.round(U * 0.036)}px "Titillium Web"`;
     const tw = g.measureText(txt).width + 32, x = W / 2 - tw / 2, y = H * 0.2;
-    g.globalAlpha = Math.min(1, (1.8 - dt) * 3); g.fillStyle = '#A855F7'; g.beginPath(); g.roundRect(x, y, tw, W * 0.06, 10); g.fill();
-    g.fillStyle = '#fff'; g.fillText(txt, W / 2, y + W * 0.043); g.globalAlpha = 1;
+    g.globalAlpha = Math.min(1, (1.8 - dt) * 3); g.fillStyle = '#A855F7'; g.beginPath(); g.roundRect(x, y, tw, U * 0.06, 10); g.fill();
+    g.fillStyle = '#fff'; g.fillText(txt, W / 2, y + U * 0.043); g.globalAlpha = 1;
   });
   // mini-map, top right
-  const mm = W * 0.2, mx = W - mm - W * 0.04, my = H * 0.12;
+  const mm = U * 0.2, mx = W / 2 + U / 2 - mm - U * 0.04, my = H * 0.12;
   const xs = TR.x, ys = TR.y, x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
   const ms = mm / Math.max(x1 - x0, y1 - y0), M = (x, y) => [mx + (x - x0) * ms, my + (y1 - y) * ms];
   g.beginPath(); for (let i = 0; i < xs.length; i += 4) { const [px, py] = M(xs[i], ys[i]); i ? g.lineTo(px, py) : g.moveTo(px, py); }
@@ -187,17 +188,18 @@ function render(t) {
   const f = me.s / FOLLOW.L, rows = t < 0 ? [] : FIELD.filter((d) => SEL.has(d.code)).map((d) => ({ d, gap: timeAtFrac(d, f) - timeAtFrac(FOLLOW, f) })).sort((a, b) => a.gap - b.gap);
   if (rows.length === 1) {                                     // one driver: their gap, big, under the speed
     const { d, gap } = rows[0];
-    g.textAlign = 'center'; g.font = `900 ${Math.round(W * 0.05)}px "Titillium Web"`; g.fillStyle = d.color;
-    g.fillText(`${d.code}  +${Math.max(0, gap).toFixed(3)}`, W / 2, H * 0.085 + W * 0.15); g.font = `700 ${Math.round(W * 0.026)}px "Titillium Web"`; g.fillStyle = '#8A8F9E';
-    g.fillText('BEHIND THE OPTIMAL LAP', W / 2, H * 0.085 + W * 0.19); g.textAlign = 'left';
+    g.textAlign = 'center'; g.font = `900 ${Math.round(U * 0.05)}px "Titillium Web"`; g.fillStyle = d.color;
+    g.fillText(`${d.code}  +${Math.max(0, gap).toFixed(3)}`, W / 2, H * 0.085 + U * 0.15); g.font = `700 ${Math.round(U * 0.026)}px "Titillium Web"`; g.fillStyle = '#8A8F9E';
+    const metres = (me.s - at(d, t).s) / UNITS_PER_M, cars = metres / 5.6;
+    g.fillText(`BEHIND THE OPTIMAL LAP${cars >= 0.5 ? ` · ${Math.round(metres)} M · ≈ ${cars.toFixed(1)} CAR LENGTHS` : ''}`, W / 2, H * 0.085 + U * 0.19); g.textAlign = 'left';
   }
-  const lx = W * 0.04, ly0 = H * 0.27, lh = W * 0.052;
-  g.textAlign = 'left'; g.font = `700 ${Math.round(W * 0.026)}px "Titillium Web"`; g.fillStyle = '#8A8F9E'; if (rows.length) g.fillText('VS OPTIMAL LAP', lx, ly0 - lh * 0.95);
+  const lx = W / 2 - U / 2 + U * 0.04, ly0 = H * 0.27, lh = U * 0.052;
+  g.textAlign = 'left'; g.font = `700 ${Math.round(U * 0.026)}px "Titillium Web"`; g.fillStyle = '#8A8F9E'; if (rows.length) g.fillText('VS OPTIMAL LAP', lx, ly0 - lh * 0.95);
   rows.forEach(({ d, gap }, k) => {
     const y = ly0 + k * lh; g.fillStyle = d.color; g.fillRect(lx, y - lh * 0.55, 4, lh * 0.7);
-    g.fillStyle = d === FOLLOW ? '#fff' : '#C9CCD4'; g.font = `900 ${Math.round(W * 0.03)}px "Titillium Web"`; g.fillText(d.code, lx + 10, y);
-    g.font = `500 ${Math.round(W * 0.026)}px "JetBrains Mono"`; g.fillStyle = Math.abs(gap) < 0.0005 ? '#A855F7' : gap < 0 ? '#7CFF5B' : '#C9CCD4';
-    g.fillText(d === FOLLOW ? 'ref' : (gap < 0 ? '−' : '+') + Math.abs(gap).toFixed(3), lx + W * 0.1, y);
+    g.fillStyle = d === FOLLOW ? '#fff' : '#C9CCD4'; g.font = `900 ${Math.round(U * 0.03)}px "Titillium Web"`; g.fillText(d.code, lx + 10, y);
+    g.font = `500 ${Math.round(U * 0.026)}px "JetBrains Mono"`; g.fillStyle = Math.abs(gap) < 0.0005 ? '#A855F7' : gap < 0 ? '#7CFF5B' : '#C9CCD4';
+    g.fillText(d === FOLLOW ? 'ref' : (gap < 0 ? '−' : '+') + Math.abs(gap).toFixed(3), lx + U * 0.1, y);
   });
 }
 window.__render = render;
