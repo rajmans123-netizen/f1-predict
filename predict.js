@@ -1,7 +1,7 @@
 // Pit Wall prediction: the order predict.py made after each session of a race weekend (data/predict/<slug>.json).
 const $ = (id) => document.getElementById(id);
 const fmt = (s) => s == null ? '–' : s >= 60 ? `${Math.floor(s / 60)}:${(s % 60).toFixed(3).padStart(6, '0')}` : s.toFixed(3);
-const NAMES = { form: 'season form', one: 'one-lap pace (optimal lap)', long: 'long-run pace', grid: 'grid position' };
+const NAMES = { form: 'season form', car: 'car race pace this season', one: 'one-lap pace (optimal lap)', long: 'long-run pace', grid: 'grid position' };
 const slug = new URLSearchParams(location.search).get('race') || 'mexico-city';
 const P = await fetch(`data/predict/${slug}.json`, { cache: 'no-cache' }).then((r) => r.json());
 $('sub').textContent = `Race: ${new Date(P.race_start).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} IST · prediction updated after every session`;
@@ -46,8 +46,8 @@ function show(k) {
     const cls = mv === '' ? 'eq' : mv > 0 ? 'up' : mv < 0 ? 'dn' : 'eq';
     const arrow = mv === '' ? '' : mv > 0 ? `▲${mv}` : mv < 0 ? `▼${-mv}` : '–';
     return `<div class="row ${r.pos <= 3 ? 'top3' : ''}"><div class="pos">P${r.pos}</div><div class="mv ${cls}">${arrow}</div>
-      <div class="drv"><b style="background:${r.color}"></b><div><div class="c">${r.code}${r.grid ? ` <span class="t">· grid P${r.grid}</span>` : ''}</div><div class="t">${r.team}</div></div></div>
-      ${r.optimal == null && FC[r.code] ? `<div class="num f" title="forecast">${fmt(FC[r.code].total)}*</div>` : `<div class="num ${r.gap === 0 ? 'p' : ''}">${fmt(r.optimal)}</div>`}<div class="num y">${r.left != null ? '-' + r.left.toFixed(3) : '–'}</div>
+      <div class="drv"><b style="background:${r.color}"></b><div><div class="c">${r.code}${r.grid ? ` <span class="t">· grid P${r.grid}</span>` : ''}</div><div class="t">${r.team}${r.car != null ? ` · car ${r.car < 0.3 ? 'on the pace' : '+' + r.car.toFixed(1) + '% race pace'}` : ''}</div></div></div>
+      ${r.optimal == null && FC[r.code] ? `<div class="num f" title="forecast">${fmt(FC[r.code].total)}*</div>` : `<div class="num ${r.gap === 0 ? 'p' : ''}">${fmt(r.optimal)}</div>`}<div class="num y">${r.left == null ? '–' : r.left < 0.0005 ? 'none' : r.left.toFixed(3) + 's'}</div>
       <div class="num">${fmt(r.longrun)}</div><div class="num m">${r.form != null ? 'P' + r.form.toFixed(1) : '–'}</div></div>`;
   }).join('');
 }

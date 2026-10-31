@@ -3,8 +3,11 @@
 #                  shown it can do); "left on the table" = best actual lap - optimal lap
 #   long-run pace = median lap of each driver's longest clean run (5+ laps, no pit, within 107% of their best)
 #   season form   = recent-weighted average finishing position over the 2026 races so far (raw_season/)
+#   car race pace = each team's clean race-lap pace over the 2026 races so far, % off the best car (recent races count more)
 #   grid          = qualifying result, once there is one
-# Each is turned into a rank 1-22 and blended with stage weights, so the order is easy to explain.
+# v2 (Raj: "Gasly P4 after FP1?"): every signal is a "position-equivalent" built from real gaps (a second off the best lap
+# ~ K places, 1% race pace ~ 8 places), not a rank; a driver with no laps in a session (FP1 rookie runs) is judged on the
+# other signals instead of being ranked last. Stage weights come from backtest.py (8 weekends, Hungary to Austin).
 # usage: python3 predict.py <meeting_key> <slug>      -> web/data/predict/<slug>.json (one entry per stage run so far)
 # (refresh the season first: ../pitwall/fetch_season.py)
 import json, os, sys, glob, time, statistics, urllib.request, urllib.error
@@ -44,6 +47,29 @@ for k, (s, res) in enumerate(races):
         pos = r['position'] if r.get('position') and not (r.get('dnf') or r.get('dns') or r.get('dsq')) else 20
         form.setdefault(r['driver_number'], []).append((pos, w))
 form = {n: sum(p * w for p, w in v) / sum(w for _, w in v) for n, v in form.items()}
+
+# ---- car race pace: each team's median clean race lap, % off the best team, recent races weighted up to 4x (upgrades)
+def race_pace(d):
+    laps = json.load(open(d + 'laps.json')); team = {x['driver_number']: x['team_name'] for x in json.load(open(d + 'drivers.json'))}
+    pits = {(p['driver_number'], p.get('lap_number')) for p in json.load(open(d + 'pit.json'))}
+    med = {}
+    for n in team:
+        ts = [l['lap_duration'] for l in laps if l['driver_number'] == n and l.get('lap_duration') and l['lap_number'] > 1
+              and not l.get('is_pit_out_lap') and (n, l['lap_number']) not in pits]
+        if len(ts) < 10: continue
+        m = statistics.median(ts); med[n] = statistics.median([t for t in ts if t < m * 1.07])     # no safety-car laps
+    tm = {}
+    for n, m in med.items(): tm.setdefault(team[n], []).append(m)
+    tm = {k: statistics.mean(v) for k, v in tm.items()}
+    best = min(tm.values()) if tm else 1
+    return {k: 100 * (v / best - 1) for k, v in tm.items()}
+pace = [race_pace(d) for d in sorted(glob.glob(f'{RAW}/*/'), key=lambda d: json.load(open(d + 'session.json'))['date_start'])
+        if json.load(open(d + 'session.json'))['date_start'] < sessions[0]['date_start'] and json.load(open(d + 'laps.json'))]
+car = {}
+for k, p in enumerate(pace):
+    w = 1 + 3 * k / max(1, len(pace) - 1)
+    for team, g in p.items(): car.setdefault(team, []).append((g, w))
+car = {k: sum(g * w for g, w in v) / sum(w for _, w in v) for k, v in car.items()}
 
 def session_stats(s):
     laps = get(f"laps?session_key={s['session_key']}", f"laps_{s['session_key']}")
@@ -96,13 +122,26 @@ for label, used in STAGES:
     grid = {}
     if quali and quali in used:
         grid = {r['driver_number']: r['position'] for r in get(f"session_result?session_key={quali['session_key']}", 'quali_result') if r.get('position')}
-    R = dict(form=ranks({n: form.get(n) for n in ns}), one=ranks({n: st.get(n, {}).get('optimal') for n in ns}),
-             long=ranks({n: st.get(n, {}).get('longrun') for n in ns}), grid=ranks({n: grid.get(n) for n in ns}))
-    # weights tuned on the 2026 season (backtest over 7 weekends, Hungary to Austin): season form and the grid carry
-    # most of it, practice long runs are mostly noise. After practice: podium right ~49% of the time; after quali ~71%.
-    W = dict(form=1.0) if not used else dict(grid=0.6, form=0.3, long=0.1) if grid else dict(form=0.6, one=0.3, long=0.1)
-    score = {n: sum(w * R[k][n] for k, w in W.items()) for n in ns}
-    order = sorted(ns, key=lambda n: (score[n], R['form'][n]))
+    o = [v['optimal'] for v in st.values() if v.get('optimal')]; l = [v['longrun'] for v in st.values() if v.get('longrun')]
+    b1, b2 = (min(o) if o else None), (min(l) if l else None)
+    practice_runs = len([s for s in used if s['session_name'] != 'Qualifying'])
+    if grid: W, K1 = dict(grid=0.7, form=0.3), 8                                   # backtest: winner right 6 of 8
+    elif practice_runs >= 2: W, K1 = dict(form=0.6, one=0.4), 12                    # practice already shows the cars
+    elif practice_runs == 1: W, K1 = dict(form=0.3, car=0.3, one=0.3, long=0.1), 5  # one session: lean on car race pace
+    else: W, K1 = dict(form=0.6, car=0.4), 8
+    def signals(n):
+        sig = {'form': form.get(n, 15)}
+        tm = drivers[n]['team_name']
+        if tm in car: sig['car'] = 1 + car[tm] * 8                                 # 1% race pace off the best car ~ 8 places
+        v = st.get(n, {})
+        if v.get('optimal') and b1: sig['one'] = 1 + min(2.0, v['optimal'] - b1) * K1
+        if v.get('longrun') and b2: sig['long'] = 1 + min(3.0, v['longrun'] - b2) * 3
+        if n in grid: sig['grid'] = grid[n]
+        return sig
+    def score(n):
+        sig = signals(n); ww = {c: w for c, w in W.items() if c in sig}
+        return sum(ww[c] * sig[c] for c in ww) / sum(ww.values())
+    order = sorted(ns, key=lambda n: (score(n), form.get(n, 15)))
     fastest_opt = min((v['optimal'] for v in st.values() if v.get('optimal')), default=None)
     rows = []
     for i, n in enumerate(order):
@@ -112,8 +151,18 @@ for label, used in STAGES:
                          best=round(v['best'], 3) if v.get('best') else None, optimal=round(v['optimal'], 3) if v.get('optimal') else None,
                          left=round(v['best'] - v['optimal'], 3) if v.get('best') and v.get('optimal') else None,
                          gap=round(v['optimal'] - fastest_opt, 3) if v.get('optimal') and fastest_opt else None,
-                         longrun=round(v['longrun'], 3) if v.get('longrun') else None, grid=grid.get(n)))
+                         longrun=round(v['longrun'], 3) if v.get('longrun') else None, grid=grid.get(n),
+                         car=round(car[d['team_name']], 2) if d['team_name'] in car else None))
     result['stages'].append(dict(label=label, weights=W, rows=rows))
     prev = order
     print(label, ' '.join(r['code'] for r in rows[:10]), '…')
+# a prediction, once published, is history: keep frozen stages exactly as they were (the video quotes "before the weekend")
+old_path = f'{OUT}/{SLUG}.json'
+if os.path.exists(old_path):
+    frozen = {st['label']: st for st in json.load(open(old_path))['stages'] if st.get('frozen')}
+    result['stages'] = [frozen.get(st['label'], st) for st in result['stages']]
+    for i in range(1, len(result['stages'])):                                   # arrows against the stage before
+        prev_order = [r['code'] for r in result['stages'][i - 1]['rows']]
+        for r in result['stages'][i]['rows']: r['prev'] = prev_order.index(r['code']) + 1 if r['code'] in prev_order else None
+for st in result['stages']: st['frozen'] = True
 json.dump(result, open(f'{OUT}/{SLUG}.json', 'w'), separators=(',', ':'))
