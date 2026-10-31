@@ -3,7 +3,7 @@ const $ = (id) => document.getElementById(id);
 const fmt = (s) => s == null ? '–' : s >= 60 ? `${Math.floor(s / 60)}:${(s % 60).toFixed(3).padStart(6, '0')}` : s.toFixed(3);
 const NAMES = { form: 'season form', one: 'one-lap pace (optimal lap)', long: 'long-run pace', grid: 'grid position' };
 const slug = new URLSearchParams(location.search).get('race') || 'mexico-city';
-const P = await fetch(`data/predict/${slug}.json`).then((r) => r.json());
+const P = await fetch(`data/predict/${slug}.json`, { cache: 'no-cache' }).then((r) => r.json());
 $('sub').textContent = `Race: ${new Date(P.race_start).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} IST · prediction updated after every session`;
 // countdown to lights out
 const tick = () => {
